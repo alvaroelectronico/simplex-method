@@ -31,6 +31,7 @@ class Simplex(object):
         self.coeff_matrix, self.r_rows, self.num_s_vars, self.num_r_vars = self.construct_matrix_from_constraints()
         del self.constraints
 
+        self.var_names = self.name_variables()
         self.tableaux_tex = self.tableau_tex_header()
 
         self.basic_vars = [0 for i in range(len(self.coeff_matrix))]
@@ -108,7 +109,7 @@ class Simplex(object):
         r_index = self.num_vars + self.num_s_vars
         for i in range(r_index, len(self.coeff_matrix[0])-1):
             self.coeff_matrix[0][i] = Fraction("-1/1")
-        coeff_0 = 0
+
         for i in self.r_rows:
             self.coeff_matrix[0] = add_row(self.coeff_matrix[0], self.coeff_matrix[i])
             self.basic_vars[i] = r_index
@@ -264,6 +265,16 @@ class Simplex(object):
 
         return solution
 
+    def name_variables(self):
+        var_names = list()
+        for i in range(1, self.num_vars+1):
+            var_names.append("x_{}".format(i))
+        for i in range(1, self.num_s_vars+1):
+            var_names.append("h_{}".format(i))
+        for i in range(1, self.num_r_vars+1):
+            var_names.append("a_{}".format(i))
+        return var_names
+
     def tableau_tex_header(self):
         str = "\\begin{center}\n \\begin{tabular}{c|c|"
         str += "c"* (self.num_vars + self.num_s_vars + self.num_r_vars)
@@ -286,7 +297,8 @@ class Simplex(object):
         for i, row in enumerate(self.coeff_matrix):
             if i == 1:
                 str += "\hline\n"
-            str += "-"
+            if i != 0:
+                str += self.var_names[self.basic_vars[i]]
             str += " & {}".format(row[len(row) - 1])
             for i in range(0, len(row) - 1):
                 str += " & {}".format(row[i])
