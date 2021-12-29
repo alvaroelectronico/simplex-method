@@ -1,6 +1,8 @@
 from fractions import Fraction
 from warnings import warn
 
+from mpmath.functions.rszeta import coef
+
 
 class Simplex(object):
     def __init__(self, num_vars, constraints, objective_function):
@@ -61,6 +63,7 @@ class Simplex(object):
         total_vars = self.num_vars + num_s_vars + num_r_vars
 
         coeff_matrix = [[Fraction("0/1") for i in range(total_vars+1)] for j in range(len(self.constraints)+1)]
+
         s_index = self.num_vars
         r_index = self.num_vars + num_s_vars
         r_rows = [] # stores the non -zero index of r
@@ -116,9 +119,17 @@ class Simplex(object):
         key_column = max_index(self.coeff_matrix[0])
         condition = self.coeff_matrix[0][key_column] > 0
 
+        ### For-debuggin. Start
+        print("Phase 1")
+        print("-------------------------")
+        for i in self.coeff_matrix:
+            print(i)
+        print("-------------------------")
+        ### For-debuggin. Start
+
         while condition is True:
 
-            key_row = self.find_key_row(key_column = key_column)
+            key_row = self.find_key_row(key_column=key_column)
             self.basic_vars[key_row] = key_column
             pivot = self.coeff_matrix[key_row][key_column]
             self.normalize_to_pivot(key_row, pivot)
@@ -126,6 +137,12 @@ class Simplex(object):
 
             key_column = max_index(self.coeff_matrix[0])
             condition = self.coeff_matrix[0][key_column] > 0
+
+            ### For-debuggin. Start
+            for i in self.coeff_matrix:
+                print(i)
+            print("-------------------------")
+            ### For-debuggin. Start
 
     def find_key_row(self, key_column):
         min_val = float("inf")
@@ -188,9 +205,17 @@ class Simplex(object):
         key_column = max_index(self.coeff_matrix[0])
         condition = self.coeff_matrix[0][key_column] > 0
 
+        ### For-debuggin. Start
+        print ("Phase 2")
+        print("-------------------------")
+        for i in self.coeff_matrix:
+            print(i)
+        print("-------------------------")
+        ### For-debuggin. Start
+
         while condition is True:
 
-            key_row = self.find_key_row(key_column = key_column)
+            key_row = self.find_key_row(key_column=key_column)
             self.basic_vars[key_row] = key_column
             pivot = self.coeff_matrix[key_row][key_column]
             self.normalize_to_pivot(key_row, pivot)
@@ -198,6 +223,12 @@ class Simplex(object):
 
             key_column = max_index(self.coeff_matrix[0])
             condition = self.coeff_matrix[0][key_column] > 0
+
+            ### For-debuggin. Start
+            for i in self.coeff_matrix:
+                print(i)
+            print("-------------------------")
+            ### For-debuggin. Start
 
         solution = {}
         for i, var in enumerate(self.basic_vars[1:]):
@@ -243,6 +274,11 @@ class Simplex(object):
         self.check_alternate_solution()
 
         return solution
+
+    def line_to_tex(self, row):
+
+        return
+
 
 def add_row(row1, row2):
     row_sum = [0 for i in range(len(row1))]
