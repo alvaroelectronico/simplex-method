@@ -30,15 +30,17 @@ class Simplex(object):
         self.objective_function = objective_function[1]
         self.coeff_matrix, self.r_rows, self.num_s_vars, self.num_r_vars = self.construct_matrix_from_constraints()
         del self.constraints
+
+        self.tableaux_tex = self.tableau_tex_header()
+
         self.basic_vars = [0 for i in range(len(self.coeff_matrix))]
         self.phase1()
+
         r_index = self.num_r_vars + self.num_s_vars
 
         for i in self.basic_vars:
             if i > r_index:
                 raise ValueError("Infeasible solution")
-
-        self.delete_r_vars()
 
         if 'min' in self.objective.lower():
             self.solution = self.objective_minimize()
@@ -46,6 +48,8 @@ class Simplex(object):
         else:
             self.solution = self.objective_maximize()
         self.optimize_val = self.coeff_matrix[0][-1]
+
+        self.tableaux_tex += self.tableau_tex_wrap()
 
     def construct_matrix_from_constraints(self):
         num_s_vars = 0  # number of slack and surplus variables
@@ -118,14 +122,7 @@ class Simplex(object):
         # Run the simplex iterations
         key_column = max_index(self.coeff_matrix[0])
         condition = self.coeff_matrix[0][key_column] > 0
-
-        ### For-debuggin. Start
-        print("Phase 1")
-        print("-------------------------")
-        for i in self.coeff_matrix:
-            print(i)
-        print("-------------------------")
-        ### For-debuggin. Start
+        self.add_tableau()
 
         while condition is True:
 
@@ -137,12 +134,7 @@ class Simplex(object):
 
             key_column = max_index(self.coeff_matrix[0])
             condition = self.coeff_matrix[0][key_column] > 0
-
-            ### For-debuggin. Start
-            for i in self.coeff_matrix:
-                print(i)
-            print("-------------------------")
-            ### For-debuggin. Start
+            self.add_tableau()
 
     def find_key_row(self, key_column):
         min_val = float("inf")
@@ -150,7 +142,7 @@ class Simplex(object):
         for i in range(1, len(self.coeff_matrix)):
             if self.coeff_matrix[i][key_column] > 0:
                 val = self.coeff_matrix[i][-1] / self.coeff_matrix[i][key_column]
-                if val <  min_val:
+                if val < min_val:
                     min_val = val
                     min_i = i
         if min_val == float("inf"):
@@ -202,16 +194,11 @@ class Simplex(object):
             if self.coeff_matrix[0][column] != 0:
                 self.coeff_matrix[0] = add_row(self.coeff_matrix[0], multiply_const_row(-self.coeff_matrix[0][column], self.coeff_matrix[row+1]))
 
-        key_column = max_index(self.coeff_matrix[0])
+        # key_column = max_index(self.coeff_matrix[0])
+        # r vars are not considered for chosing the pivot column
+        key_column = max_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
         condition = self.coeff_matrix[0][key_column] > 0
-
-        ### For-debuggin. Start
-        print ("Phase 2")
-        print("-------------------------")
-        for i in self.coeff_matrix:
-            print(i)
-        print("-------------------------")
-        ### For-debuggin. Start
+        self.add_tableau()
 
         while condition is True:
 
@@ -223,12 +210,7 @@ class Simplex(object):
 
             key_column = max_index(self.coeff_matrix[0])
             condition = self.coeff_matrix[0][key_column] > 0
-
-            ### For-debuggin. Start
-            for i in self.coeff_matrix:
-                print(i)
-            print("-------------------------")
-            ### For-debuggin. Start
+            self.add_tableau()
 
         solution = {}
         for i, var in enumerate(self.basic_vars[1:]):
@@ -248,19 +230,26 @@ class Simplex(object):
             if self.coeff_matrix[0][column] != 0:
                 self.coeff_matrix[0] = add_row(self.coeff_matrix[0], multiply_const_row(-self.coeff_matrix[0][column], self.coeff_matrix[row+1]))
 
-        key_column = min_index(self.coeff_matrix[0])
+        # key_column = min_index(self.coeff_matrix[0])
+        # r vars are not considered for chosing the pivot column
+        key_column = min_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
         condition = self.coeff_matrix[0][key_column] < 0
+        self.add_tableau()
 
         while condition is True:
 
-            key_row = self.find_key_row(key_column = key_column)
+            key_row = self.find_key_row(key_column=key_column)
             self.basic_vars[key_row] = key_column
             pivot = self.coeff_matrix[key_row][key_column]
             self.normalize_to_pivot(key_row, pivot)
             self.make_key_column_zero(key_column, key_row)
 
-            key_column = min_index(self.coeff_matrix[0])
+            # key_column = min_index(self.coeff_matrix[0])
+            # r vars are not considered for chosing the pivot column
+            key_column = min_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
             condition = self.coeff_matrix[0][key_column] < 0
+            condition = self.coeff_matrix[0][key_column] < 0
+            self.add_tableau()
 
         solution = {}
         for i, var in enumerate(self.basic_vars[1:]):
@@ -275,9 +264,35 @@ class Simplex(object):
 
         return solution
 
-    def line_to_tex(self, row):
+    def tableau_tex_header(self):
+        str = "\\begin{center}\n \\begin{tabular}{c|c|"
+        str += "c"* (self.num_vars + self.num_s_vars + self.num_r_vars)
+        str += "|}\n"
+        str += " & $z$"
+        for i in range(1, self.num_vars+1):
+            str += " & $x_{}$".format(i)
+        for i in range(1, self.num_s_vars+1):
+            str += " & $h_{}$".format(i)
+        for i in range(1, self.num_r_vars+1):
+            str += " & $a_{}$".format(i)
+        str += "\\\\ \n"
+        return str
 
-        return
+    def tableau_tex_wrap(self):
+        return "\end{tabular}\n\end{center}\n"
+
+    def add_tableau(self):
+        str = ""
+        for i, row in enumerate(self.coeff_matrix):
+            if i == 1:
+                str += "\hline\n"
+            str += "-"
+            str += " & {}".format(row[len(row) - 1])
+            for i in range(0, len(row) - 1):
+                str += " & {}".format(row[i])
+            str += "\\\\ \n"
+        str += "\hline\n"
+        self.tableaux_tex += str
 
 
 def add_row(row1, row2):
