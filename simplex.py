@@ -1,8 +1,8 @@
 from fractions import Fraction
 from warnings import warn
-
+from collections import namedtuple
+import numpy as np
 from mpmath.functions.rszeta import coef
-
 
 class Simplex(object):
     def __init__(self, num_vars, constraints, objective_function):
@@ -28,11 +28,22 @@ class Simplex(object):
         self.constraints = constraints
         self.objective = objective_function[0]
         self.objective_function = objective_function[1]
-        self.coeff_matrix, self.r_rows, self.num_s_vars, self.num_r_vars = self.construct_matrix_from_constraints()
+        self.coeff_matrix, self.r_rows, self.num_s_vars, self.num_r_vars, self.c, self.A, self.b = self.construct_matrix_from_constraints()
+        self.model_tex = self.formulation_tex()
         del self.constraints
 
+        """
+        Generating tableau tex format
+        """
+        # This list contains the names x_1...x_{num_vars}, h_1...h_{num_s_vars}, a_1...a_{num_r_vars}
+        # to be displayed when tableaux are built
         self.var_names = self.name_variables()
+        # List where each element contains the tex format for building the tableau
         self.tableaux_list = list()
+        """
+        all_solutions is a list with as many namedtuple solutions as iterations of the simlpes method
+        """
+        self.all_bases = list()
 
         self.basic_vars = [0 for i in range(len(self.coeff_matrix))]
         self.phase1()
@@ -51,16 +62,15 @@ class Simplex(object):
         self.optimize_val = self.coeff_matrix[0][-1]
 
     def construct_matrix_from_constraints(self):
+
         num_s_vars = 0  # number of slack and surplus variables
         num_r_vars = 0  # number of additional variables to balance equality and less than equal to
         for expression in self.constraints:
-            if '>=' in expression:
+            if '<=' in expression:
                 num_s_vars += 1
-
-            elif '<=' in expression:
+            elif '>=' in expression:
                 num_s_vars += 1
                 num_r_vars += 1
-
             elif '=' in expression:
                 num_r_vars += 1
         total_vars = self.num_vars + num_s_vars + num_r_vars
@@ -78,9 +88,9 @@ class Simplex(object):
                 if '_' in constraint[j]:
                     coeff, index = constraint[j].split('_')
                     if constraint[j-1] is '-':
-                        coeff_matrix[i][int(index)-1] = Fraction("-" + coeff[:-1] + "/1")
+                        coeff_matrix[i][int(index) - 1] = Fraction(-coeff[:-1]).limit_denominator()
                     else:
-                        coeff_matrix[i][int(index)-1] = Fraction(coeff[:-1] + "/1")
+                        coeff_matrix[i][int(index) - 1] = Fraction(coeff[:-1]).limit_denominator()
 
                 elif constraint[j] == '<=':
                     coeff_matrix[i][s_index] = Fraction("1/1")  # add surplus variable
@@ -100,7 +110,27 @@ class Simplex(object):
 
             coeff_matrix[i][-1] = Fraction(constraint[-1] + "/1")
 
-        return coeff_matrix, r_rows, num_s_vars, num_r_vars
+        c = [Fraction("0/1") for i in range(total_vars)]
+        objective_function_coeffs = self.objective_function.split()
+        for i in range(len(objective_function_coeffs)):
+            if '_' in objective_function_coeffs[i]:
+                coeff, index = objective_function_coeffs[i].split('_')
+                if objective_function_coeffs[i - 1] is '-':
+                    c[int(index) - 1] = Fraction("-" +coeff[:-1] + "/1")
+                else:
+                    c[int(index) - 1] = Fraction(coeff[:-1] + "/1")
+        c = np.array(c).reshape(-1, 1)
+        c = array_to_fraction(c)
+
+        a = [[coeff_matrix[i][j] for j in range(len(coeff_matrix[0])-1)] for i in range(1, len(coeff_matrix))]
+        a = np.array(a)
+        a = array_to_fraction(a)
+
+        b = [coeff_matrix[i][len(coeff_matrix[0])-1] for i in range(1, len(coeff_matrix))]
+        b = np.array(b).reshape(-1,1)
+        b = array_to_fraction(b)
+
+        return coeff_matrix, r_rows, num_s_vars, num_r_vars, c, a, b
 
     def phase1(self):
         # Objective function here is minimize r1+ r2 + r3 + ... + rn
@@ -122,6 +152,7 @@ class Simplex(object):
         key_column = max_index(self.coeff_matrix[0])
         condition = self.coeff_matrix[0][key_column] > 0
         self.tableaux_list.append(self.tableau_tex_from_coeff_matrix())
+        self.all_bases.append(self.get_base())
 
         while condition is True:
 
@@ -134,6 +165,7 @@ class Simplex(object):
             key_column = max_index(self.coeff_matrix[0])
             condition = self.coeff_matrix[0][key_column] > 0
             self.tableaux_list.append(self.tableau_tex_from_coeff_matrix())
+            self.all_bases.append(self.get_base())
 
     def find_key_row(self, key_column):
         min_val = float("inf")
@@ -196,6 +228,8 @@ class Simplex(object):
         # r vars are not considered for chosing the pivot column
         key_column = max_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
         condition = self.coeff_matrix[0][key_column] > 0
+        self.tableaux_list.append(self.tableau_tex_from_coeff_matrix())
+        self.all_bases.append(self.get_base())
 
         while condition is True:
 
@@ -208,6 +242,7 @@ class Simplex(object):
             key_column = max_index(self.coeff_matrix[0])
             condition = self.coeff_matrix[0][key_column] > 0
             self.tableaux_list.append(self.tableau_tex_from_coeff_matrix())
+            self.all_bases.append(self.get_base())
 
         solution = {}
         for i, var in enumerate(self.basic_vars[1:]):
@@ -231,6 +266,7 @@ class Simplex(object):
         key_column = min_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
         condition = self.coeff_matrix[0][key_column] < 0
         self.tableaux_list.append(self.tableau_tex_from_coeff_matrix())
+        self.all_bases.append(self.get_base())
 
         while condition is True:
 
@@ -244,6 +280,7 @@ class Simplex(object):
             key_column = min_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
             condition = self.coeff_matrix[0][key_column] < 0
             self.tableaux_list.append(self.tableau_tex_from_coeff_matrix())
+            self.all_bases.append(self.get_base())
 
         solution = {}
         for i, var in enumerate(self.basic_vars[1:]):
@@ -292,21 +329,54 @@ class Simplex(object):
                 str += "\hline\n"
             if i != 0:
                 str += "${}$".format(self.var_names[self.basic_vars[i]])
-            str += " & {}".format(row[len(row) - 1])
-            for i in range(0, len(row) - 1):
-                str += " & {}".format(row[i])
+            if i == 0:
+                str += " & {}".format(-row[len(row) - 1])
+            else:
+                str += " & {}".format(row[len(row) - 1])
+            for j in range(0, len(row) - 1):
+                if i == 0:
+                    str += " & {}".format(-row[j])
+                else:
+                    str += " & {}".format(row[j])
             str += "\\\\ \n"
         str += "\hline\n"
         return str
 
+    def formulation_tex(self):
+        tex_str = "\\begin{equation}\n\\begin{split}\n"
+        if 'min' in self.objective.lower():
+            tex_str += "\mbox{min. } z = " + self.objective_function + "\\\\\n"
+        else:
+            tex_str += "\mbox{max. } z = " + self.objective_function + "\\\\\n"
+        tex_str += "s.a.:\\\\\n"
+        char_to_replace = {'<=': '\\leq',
+                           '>=': '\\geq'}
+        for expression in self.constraints:
+            # Iterate over all key-value pairs in dictionary
+            for key, value in char_to_replace.items():
+                # Replace key character with value character in string
+                expression = expression.replace(key, value)
+            tex_str += expression + "\\\\\n"
+        for i in range(1, self.num_vars+1):
+            tex_str += "x_{}".format(i)
+            if i!=self.num_vars:
+                tex_str += ",\\,\\,"
+        tex_str+="\geq 0\\\\\n"
+        tex_str += "\\end{split}\n\\end{equation}"
+        return tex_str
+
     def compose_tableaux(self, first_tableau=0, last_tableau=float('inf')):
         last_tableau = min(len(self.tableaux_list), last_tableau)
+        first_tableau = max(0, min(first_tableau, last_tableau-1))
         str = self.tableau_tex_header()
         for i in range(first_tableau, last_tableau):
             str += self.tableaux_list[i]
         str += self.tableau_tex_wrap()
         return str
 
+    def get_base(self):
+        base = self.A[:, self.basic_vars[1:]]
+        return base
 
 def add_row(row1, row2):
     row_sum = [0 for i in range(len(row1))]
@@ -333,4 +403,11 @@ def min_index(row):
         if row[min_i] > row[i]:
             min_i = i
     return min_i
+
+def array_to_fraction(arr):
+    to_fraction = lambda t: Fraction(t).limit_denominator()
+    vfunc = np.vectorize(to_fraction)
+    return vfunc(arr)
+
+
 
