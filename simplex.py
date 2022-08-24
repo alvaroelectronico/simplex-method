@@ -38,8 +38,10 @@ class Simplex(object):
         # b: constraints RHS
         # A: A matrix (no. constraints x no. vars)
 
-        self.coeff_matrix, self.r_rows, self.num_s_vars, self.num_r_vars, self.c1, \
+        self.coeff_matrix,  self.s_rows, self.r_rows, self.num_s_vars, self.num_r_vars, self.c1, \
         self.c2, self.A, self.b = self.construct_matrix_from_constraints()
+
+        self.total_vars = self.num_vars + self.num_s_vars + self.num_r_vars
 
         # Getting the sense of the problem
         if 'min' in self.objective.lower():
@@ -72,7 +74,7 @@ class Simplex(object):
     def construct_matrix_from_constraints(self):
 
         num_s_vars = 0  # number of slack variables
-        num_r_vars = 0  # number of artifitial variables
+        num_r_vars = 0  # number of artificial variables
         for expression in self.constraints:
             if '<=' in expression:
                 num_s_vars += 1
@@ -87,7 +89,8 @@ class Simplex(object):
 
         s_index = self.num_vars
         r_index = self.num_vars + num_s_vars
-        r_rows = []  # stores the non-zero index of r
+        r_rows = list()  # stores the non-zero index of art. variables
+        s_rows = list()  # stores the non-zero index of slack. variables
 
         c1 = [Fraction("0/1") for i in range(total_vars)]
 
@@ -104,12 +107,14 @@ class Simplex(object):
                 elif constraint[j] == '<=':
                     coeff_matrix[i][s_index] = Fraction("1/1")  # add surplus variable
                     s_index += 1
+                    s_rows.append(i)
 
                 elif constraint[j] == '>=':
                     coeff_matrix[i][s_index] = Fraction("-1/1")  # slack variable
                     coeff_matrix[i][r_index] = Fraction("1/1")   # r variable
                     s_index += 1
                     r_index += 1
+                    s_rows.append(i)
                     r_rows.append(i)
                     c1[s_index+1] = -1
 
@@ -146,7 +151,7 @@ class Simplex(object):
         b = array_to_fraction(b)
 
 
-        return coeff_matrix, r_rows, num_s_vars, num_r_vars, c1, c2, a, b
+        return coeff_matrix, s_rows, r_rows, num_s_vars, num_r_vars, c1, c2, a, b
 
     def phase1(self):
         # Objective function here is minimize r1+ r2 + r3 + ... + rn
@@ -158,7 +163,7 @@ class Simplex(object):
         # TO-DO. Revise tha fact that the list goes from 0 to no. constraints (it seems there is an extra element)
         self.basic_vars = [0 for i in range(len(self.coeff_matrix))]
 
-        # Changing first row of coeff_matrix according to the phase 1
+        # Changing first row (index = 0) of coeff_matrix according to the phase 1
         for i in range(r_index, len(self.coeff_matrix[0])-1):
             self.coeff_matrix[0][i] = Fraction("-1/1")
 
@@ -178,7 +183,7 @@ class Simplex(object):
 
         # Run the simplex iterations
         # Selecting the input variable
-        key_column = max_index(self.coeff_matrix[0])
+        key_column = max_index(self.coeff_matrix[0][:-1])
         # There are candidate input variables if the corresponding reduced cost is > 0
         condition = self.coeff_matrix[0][key_column] > 0
         # The tableau and the current base is stored in tableaux_list and all_bases, respect.
@@ -196,9 +201,8 @@ class Simplex(object):
             self.normalize_to_pivot(key_row, pivot)
             # Pivoting: making all values (but the pivot) of the pivot-column 0
             self.make_key_column_zero(key_column, key_row)
-
             # Selecting the input variable
-            key_column = max_index(self.coeff_matrix[0])
+            key_column = max_index(self.coeff_matrix[0][:-1])
             # There are candidate input variables if the corresponding reduced cost is > 0
             condition = self.coeff_matrix[0][key_column] > 0
             # The tableau and the current base is stored in tableaux_list and all_bases, respect.
@@ -226,7 +230,11 @@ class Simplex(object):
         # Selecting the input variable and checking if there is room for improvement
         # art. vars. are not eligible whenr chosing the input variable
         if self.sense == 'max':
+            print("")
+            print(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
             key_column = max_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
+            print(key_column)
+            print("")
             condition = self.coeff_matrix[0][key_column] > 0
         else:
             key_column = min_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
@@ -245,7 +253,7 @@ class Simplex(object):
 
             # r vars are not considered for chosing the pivot column
             if self.sense == 'max':
-                key_column = max_index(self.coeff_matrix[0])
+                key_column = max_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
                 condition = self.coeff_matrix[0][key_column] > 0
             else:
                 key_column = min_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
@@ -302,14 +310,15 @@ class Simplex(object):
                 length -= 1
 
     def update_objective_function(self):
+        self.coeff_matrix[0] = [Fraction("0/1") for i in range(self.total_vars + 1)]
         objective_function_coeffs = self.objective_function.split()
         for i in range(len(objective_function_coeffs)):
             if '_' in objective_function_coeffs[i]:
                 coeff, index = objective_function_coeffs[i].split('_')
                 if objective_function_coeffs[i-1] == '-':
-                    self.coeff_matrix[0][int(index)-1] = Fraction(coeff[:-1] + "/1")
-                else:
                     self.coeff_matrix[0][int(index)-1] = Fraction("-" + coeff[:-1] + "/1")
+                else:
+                    self.coeff_matrix[0][int(index)-1] = Fraction(coeff[:-1] + "/1")
 
     def check_alternate_solution(self):
         for i in range(len(self.coeff_matrix[0])):
@@ -321,10 +330,10 @@ class Simplex(object):
         var_names = list()
         for i in range(1, self.num_vars+1):
             var_names.append("x_{}".format(i))
-        for i in range(1, self.num_s_vars+1):
-            var_names.append("h_{}".format(i))
-        for i in range(1, self.num_r_vars+1):
-            var_names.append("a_{}".format(i))
+        for i in range(0, self.num_s_vars):
+            var_names.append("h_{}".format(self.s_rows[i]))
+        for i in range(0, self.num_r_vars):
+            var_names.append("a_{}".format(self.r_rows[i]))
         return var_names
 
     def tableau_tex_header(self):
@@ -332,12 +341,8 @@ class Simplex(object):
         str += "c"* (self.num_vars + self.num_s_vars + self.num_r_vars)
         str += "|}\n"
         str += " & $z$"
-        for i in range(1, self.num_vars+1):
-            str += " & $x_{}$".format(i)
-        for i in range(1, self.num_s_vars+1):
-            str += " & $h_{}$".format(i)
-        for i in range(1, self.num_r_vars+1):
-            str += " & $a_{}$".format(i)
+        for i in range(self.num_vars + self.num_s_vars + self.num_r_vars):
+            str += " & ${}$".format(self.var_names[i])
         str += "\\\\ \n"
         return str
 
@@ -352,12 +357,12 @@ class Simplex(object):
             if i != 0:
                 str += "${}$".format(self.var_names[self.basic_vars[i]])
             if i == 0:
-                str += " & {}".format(-row[len(row) - 1])
+                str += " & {}".format(row[len(row) - 1])
             else:
                 str += " & {}".format(row[len(row) - 1])
             for j in range(0, len(row) - 1):
                 if i == 0:
-                    str += " & {}".format(-row[j])
+                    str += " & {}".format(row[j])
                 else:
                     str += " & {}".format(row[j])
             str += "\\\\ \n"
@@ -407,8 +412,11 @@ def sum_rows(row1, row2):
     return row_sum
 
 def max_index(row):
+    print("row in max_index function")
+    print(row)
     max_i = 0
-    for i in range(0, len(row)-1):
+    for i in range(0, len(row)):
+        print("{}, evaluated item".format(row[i]))
         if row[i] > row[max_i]:
             max_i = i
     return max_i
