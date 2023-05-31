@@ -4,6 +4,11 @@ from collections import namedtuple
 import numpy as np
 from mpmath.functions.rszeta import coef
 
+BasicSolution = namedtuple(
+    "basic_solution", ["B", "cB", "uB", "pB", "piB", "xB", "z", "invB", "VB", "cB_f1", "p1B_f1", "vB_f1", "z_f1"]
+)
+
+
 class Simplex(object):
     def __init__(self, num_vars, constraints, objective_function):
         """
@@ -43,13 +48,6 @@ class Simplex(object):
 
         self.total_vars = self.num_vars + self.num_s_vars + self.num_r_vars
 
-        # Getting the sense of the problem
-        if 'min' in self.objective.lower():
-            self.sense = 'min'
-        else:
-            self.sense = 'max'
-
-
         # Generating the .tex text with the model formulation
         self.model_tex = self.formulation_tex()
 
@@ -63,6 +61,8 @@ class Simplex(object):
 
         # all_solutions is a list with as many namedtuple solutions as iterations of the simplex method
         self.all_bases = list()
+        self.first_feasible_base = list()
+        self.last_base = list()
 
     def solve_model(self):
 
@@ -83,16 +83,24 @@ class Simplex(object):
                 num_r_vars += 1
             elif '=' in expression:
                 num_r_vars += 1
+
         total_vars = self.num_vars + num_s_vars + num_r_vars
 
         coeff_matrix = [[Fraction("0/1") for i in range(total_vars+1)] for j in range(len(self.constraints)+1)]
 
-        s_index = self.num_vars
-        r_index = self.num_vars + num_s_vars
+        first_s_index = self.num_vars # starting index for slack variables
+        frist_r_index = self.num_vars + num_s_vars # starting index for artifitial variables
         r_rows = list()  # stores the non-zero index of art. variables
-        s_rows = list()  # stores the non-zero index of slack. variables
+        s_rows = list()  # stores the non-zero index of slack. variable
 
-        c1 = [Fraction("0/1") for i in range(total_vars)]
+        # c1 = [Fraction("0/1") for i in range(total_vars)]
+        c1 = [Fraction("0/1") for i in range(self.num_vars + num_s_vars)]
+        c1.extend([-Fraction("1/1") for i in range(num_r_vars)])
+
+        # These are counters to modify the objective function for phase according the
+        # constraints nature (<=, = or >=)
+        count_s_index = first_s_index
+        count_r_index = frist_r_index
 
         for i in range(1, len(self.constraints)+1):
             constraint = self.constraints[i-1].split(' ')
@@ -105,22 +113,22 @@ class Simplex(object):
                         coeff_matrix[i][int(index) - 1] = Fraction(coeff[:-1]).limit_denominator()
 
                 elif constraint[j] == '<=':
-                    coeff_matrix[i][s_index] = Fraction("1/1")  # add surplus variable
-                    s_index += 1
+                    coeff_matrix[i][count_s_index] = Fraction("1/1")  # add surplus variable
+                    count_s_index += 1
                     s_rows.append(i)
 
                 elif constraint[j] == '>=':
-                    coeff_matrix[i][s_index] = Fraction("-1/1")  # slack variable
-                    coeff_matrix[i][r_index] = Fraction("1/1")   # r variable
-                    s_index += 1
-                    r_index += 1
+                    coeff_matrix[i][count_s_index] = Fraction("-1/1")  # slack variable
+                    coeff_matrix[i][count_r_index] = Fraction("1/1")   # r variable
+                    count_s_index += 1
+                    count_r_index += 1
                     s_rows.append(i)
                     r_rows.append(i)
-                    c1[s_index+1] = -1
+                    c1[count_s_index+1] = -1
 
                 elif constraint[j] == '=':
-                    coeff_matrix[i][r_index] = Fraction("1/1")  # r variable
-                    r_index += 1
+                    coeff_matrix[i][count_r_index] = Fraction("1/1")  # r variable
+                    count_r_index += 1
                     r_rows.append(i)
 
             coeff_matrix[i][-1] = Fraction(constraint[-1] + "/1")
@@ -135,7 +143,7 @@ class Simplex(object):
                 else:
                     c2[int(index) - 1] = Fraction(coeff[:-1] + "/1")
 
-        c1 = np.array(c1).reshape(-1,1)
+        c1 = np.array(c1).reshape(-1, 1)
         c1 = array_to_fraction(c1)
 
         c2 = np.array(c2).reshape(-1, 1)
@@ -156,30 +164,32 @@ class Simplex(object):
     def phase1(self):
         # Objective function here is minimize r1+ r2 + r3 + ... + rn
 
-        # r_index contains the position of the first artificial variable
-        r_index = self.num_vars + self.num_s_vars
+        # first_r_index contains the position of the first artificial variable
+        fisrt_r_index = self.num_vars + self.num_s_vars
+        count_r_index = fisrt_r_index
 
         # basic_vars initialized to a list with as many elements as constraints.
         # TO-DO. Revise tha fact that the list goes from 0 to no. constraints (it seems there is an extra element)
         self.basic_vars = [0 for i in range(len(self.coeff_matrix))]
 
         # Changing first row (index = 0) of coeff_matrix according to the phase 1
-        for i in range(r_index, len(self.coeff_matrix[0])-1):
+        for i in range(fisrt_r_index, len(self.coeff_matrix[0])-1):
             self.coeff_matrix[0][i] = Fraction("-1/1")
 
         # Computing reduced costs for first base (where slack and art. variables are basic)
         # Basic variable indices corresponding to art. variables are stored in basic_vars
         for i in self.r_rows:
             self.coeff_matrix[0] = sum_rows(self.coeff_matrix[0], self.coeff_matrix[i])
-            self.basic_vars[i] = r_index
-            r_index += 1
+            self.basic_vars[i] = count_r_index
+            count_r_index += 1
 
         # Basic variable indices corresponding to slack. variables (+1 coeff.) are stored in basic_vars
-        s_index = self.num_vars
+        first_s_index = self.num_vars
+        count_s_index = first_s_index
         for i in range(1, len(self.basic_vars)):
             if self.basic_vars[i] == 0:
-                self.basic_vars[i] = s_index
-                s_index += 1
+                self.basic_vars[i] = count_s_index
+                count_s_index += 1
 
         # Run the simplex iterations
         # Selecting the input variable
@@ -212,8 +222,11 @@ class Simplex(object):
         # If any art. var is basic the problem is infeseasible. No phase 2 required.
         # TO-DO. If all art. vars are 0, the problem is feaseible
         for i in self.basic_vars:
-            if i > r_index:
-                raise ValueError("Infeasible problem")
+            if i >= fisrt_r_index:
+                print ("Infeasible problem")
+                # raise ValueError("Infeasible problem")
+        else:
+            self.first_feasible_base = self.all_bases[len(self.all_bases) - 1]
 
     def phase2(self):
 
@@ -229,19 +242,15 @@ class Simplex(object):
 
         # Selecting the input variable and checking if there is room for improvement
         # art. vars. are not eligible whenr chosing the input variable
-        if self.sense == 'max':
-            print("")
-            print(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
+        if 'max' in self.objective.lower():
             key_column = max_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
-            print(key_column)
-            print("")
             condition = self.coeff_matrix[0][key_column] > 0
         else:
             key_column = min_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
             condition = self.coeff_matrix[0][key_column] < 0
 
-        self.tableaux_list.append(self.tableau_tex_from_coeff_matrix())
-        self.all_bases.append([int(i) for i in self.basic_vars[1:]])
+        # self.tableaux_list.append(self.tableau_tex_from_coeff_matrix())
+        # 9self.all_bases.append([int(i) for i in self.basic_vars[1:]])
 
         while condition is True:
 
@@ -252,7 +261,7 @@ class Simplex(object):
             self.make_key_column_zero(key_column, key_row)
 
             # r vars are not considered for chosing the pivot column
-            if self.sense == 'max':
+            if 'max' in self.objective.lower():
                 key_column = max_index(self.coeff_matrix[0][:self.num_vars + self.num_s_vars])
                 condition = self.coeff_matrix[0][key_column] > 0
             else:
@@ -273,6 +282,7 @@ class Simplex(object):
         self.check_alternate_solution()
 
         self.solution = solution
+        self.last_base = self.all_bases[len(self.all_bases) - 1]
 
     def find_key_row(self, key_column):
         min_val = float("inf")
@@ -412,11 +422,8 @@ def sum_rows(row1, row2):
     return row_sum
 
 def max_index(row):
-    print("row in max_index function")
-    print(row)
     max_i = 0
     for i in range(0, len(row)):
-        print("{}, evaluated item".format(row[i]))
         if row[i] > row[max_i]:
             max_i = i
     return max_i
@@ -438,6 +445,5 @@ def array_to_fraction(arr):
     to_fraction = lambda t: Fraction(t).limit_denominator()
     vfunc = np.vectorize(to_fraction)
     return vfunc(arr)
-
 
 
